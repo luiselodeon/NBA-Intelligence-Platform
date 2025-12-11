@@ -1,6 +1,6 @@
 # Luis Alberto Arias Llaguno
 # David Ceballos Mata
-# Ruben
+# Rubén Octavio Flores Ramos
 
 """
 En este archivo se encuentra el proyecto final del curso de Analítica Avanzada en un solo archivo de 
