@@ -1,0 +1,7 @@
+mlruns
+models
+__pycache__
+.trash
+keras_tuner_lakers_runs
+kt_lakers_runs
+kt_lakers_mlp
