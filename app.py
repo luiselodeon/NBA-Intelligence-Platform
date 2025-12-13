@@ -12,6 +12,10 @@ from flask import Flask, request, jsonify, make_response
 from nba_api.stats.endpoints import leaguegamefinder, leaguedashplayerstats
 from nba_api.stats.static import teams
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import GaussianNB
+from sklearn.pipeline import Pipeline
+
 import xgboost as xgb
 
 
@@ -164,6 +168,7 @@ print("--- Initializing Application ---")
 xgb_model = None
 xgb_feature_cols = None
 xgb_base_data = None
+playoff_model = None
 
 try:
     # 1. Load the XGBoost model bundle
@@ -173,15 +178,22 @@ try:
     xgb_feature_cols = xgb_bundle["feature_cols"]
     print("XGBoost model loaded successfully.")
 
-    # 2. Prepare the base data required for feature generation
+    # 2. Load the Playoff prediction model
+    print("Loading Playoff prediction model from joblib...")
+    playoff_model = joblib.load("modelo_nba.joblib")
+    print("Playoff prediction model loaded successfully.")
+
+    # 3. Prepare the base data required for feature generation
     print("Fetching and preparing base NBA data (2015-2025)...")
     raw_data = fetch_official_nba_regular_season(start_year=2015, end_year=2025)
     team_game_data = build_team_game_table_from_raw(raw_data)
     xgb_base_data = add_pregame_features_teamgame(team_game_data, window=5, keep_early_games=True)
     print("Base NBA data is ready.")
+
 except Exception as e:
     print(f"FATAL: Could not initialize models or data on startup: {e}", file=sys.stderr)
     xgb_model = None  # Ensure model is None if setup fails
+    playoff_model = None
 
 print("--- Application Ready ---")
 
@@ -257,7 +269,7 @@ def cluster_players():
 def predict_matchup():
     """Endpoint to predict the outcome of a single NBA matchup."""
     if not xgb_model:
-        return make_response(jsonify(error="El modelo de predicción no está inicializado."), 503)
+        return make_response(jsonify(error="El modelo de predicción de partidos no está inicializado."), 503)
 
     json_data = request.get_json()
     if not json_data:
@@ -271,7 +283,6 @@ def predict_matchup():
         return make_response(jsonify(error="Se requieren 'home_abbr' y 'away_abbr' en el JSON."), 400)
 
     try:
-        # Build features for the single game
         feature_row = build_single_game_features(
             df_team_feat=xgb_base_data,
             home_abbr=home_abbr,
@@ -279,39 +290,12 @@ def predict_matchup():
             as_of_date=as_of_date,
             window=5
         )
-
-        # Align columns to match training
         X_one = feature_row.reindex(columns=xgb_feature_cols)
-
-        # --- Fallback para features de posesiones ---
-        poss_cols = [
-            'H_POSS_EST_roll5',
-            'A_POSS_EST_roll5',
-            'DIFF_POSS_EST_roll5'
-        ]
-
-        for col in poss_cols:
-            if col in X_one.columns and X_one[col].isna().any():
-                X_one[col] = 0.0  # neutral value
-
-        # --- Fallback para flags de rolling ---
-        flag_cols = [
-            'H_HAS_ROLL_FEATURES',
-            'A_HAS_ROLL_FEATURES'
-        ]
-
-        for col in flag_cols:
-            if col in X_one.columns and X_one[col].isna().any():
-                X_one[col] = 0
-
-        print(X_one.isna().sum())
 
         if X_one.isna().any().any():
             missing_cols = X_one.columns[X_one.isna().any()].tolist()
-            return make_response(
-                jsonify(error=f"No se pudieron generar todas las features. Faltan datos para: {missing_cols}"), 500)
+            return make_response(jsonify(error=f"No se pudieron generar todas las features. Faltan datos para: {missing_cols}"), 500)
 
-        # Predict probability
         p_home = float(xgb_model.predict_proba(X_one)[:, 1][0])
         p_away = 1.0 - p_home
 
@@ -328,6 +312,49 @@ def predict_matchup():
         return make_response(jsonify(error=str(e)), 400)
     except Exception as e:
         print(f"ERROR: /predict_matchup failed: {e}", file=sys.stderr)
+        return make_response(jsonify(error="Ocurrió un error interno al procesar la predicción."), 500)
+
+
+@app.route('/predict_playoffs', methods=['POST'])
+def predict_playoffs():
+    """Endpoint to predict if a team will make the playoffs based on its stats."""
+    if not playoff_model:
+        return make_response(jsonify(error="El modelo de predicción de playoffs no está inicializado."), 503)
+
+    json_data = request.get_json()
+    if not json_data:
+        return make_response(jsonify(error="Request body debe ser JSON."), 400)
+
+    # Validate required features
+    required_features = ['WinPCT', 'PointsPG', 'OppPointsPG', 'DiffPointsPG']
+    if not all(feat in json_data for feat in required_features):
+        return make_response(jsonify(error=f"Faltan features. Se requieren: {required_features}"), 400)
+
+    try:
+        # Create DataFrame from input
+        input_data = {feat: [json_data[feat]] for feat in required_features}
+        input_df = pd.DataFrame(input_data)
+
+        # Predict outcome and probability
+        prediction = int(playoff_model.predict(input_df)[0])
+        probabilities = playoff_model.predict_proba(input_df)[0]
+        
+        prob_no_playoffs = round(probabilities[0], 4)
+        prob_playoffs = round(probabilities[1], 4)
+
+        response = {
+            "input_stats": json_data,
+            "prediction_label": "Hace Playoffs" if prediction == 1 else "No Hace Playoffs",
+            "prediction_value": prediction,
+            "probability_no_playoffs": prob_no_playoffs,
+            "probability_playoffs": prob_playoffs
+        }
+        return jsonify(response)
+        
+    except (TypeError, ValueError):
+         return make_response(jsonify(error="Todas las features deben ser valores numéricos."), 400)
+    except Exception as e:
+        print(f"ERROR: /predict_playoffs failed: {e}", file=sys.stderr)
         return make_response(jsonify(error="Ocurrió un error interno al procesar la predicción."), 500)
 
 
