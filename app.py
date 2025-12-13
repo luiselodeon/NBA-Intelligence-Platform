@@ -221,7 +221,7 @@ def preprocess_data_kmeans(df: pd.DataFrame, features: list) -> (pd.DataFrame, p
 # ==============================================================================
 # ENDPOINTS
 # ==============================================================================
-
+# Endpoint para clustering de jugadores (David Ceballos)
 @app.route('/cluster_players/', methods=['GET'])
 def cluster_players():
     """Endpoint to get clusters of NBA players."""
@@ -264,7 +264,7 @@ def cluster_players():
 
     return jsonify(k=k, player_clusters=results)
 
-
+# Endpoint para predicción de partidos NBA (XGBoost Luis Arias)
 @app.route('/predict_matchup', methods=['POST'])
 def predict_matchup():
     """Endpoint to predict the outcome of a single NBA matchup."""
@@ -314,7 +314,7 @@ def predict_matchup():
         print(f"ERROR: /predict_matchup failed: {e}", file=sys.stderr)
         return make_response(jsonify(error="Ocurrió un error interno al procesar la predicción."), 500)
 
-
+# Endpoint para predicción de playoffs NBA (Rubén Flores)
 @app.route('/predict_playoffs', methods=['POST'])
 def predict_playoffs():
     """Endpoint to predict if a team will make the playoffs based on its stats."""
