@@ -1,4 +1,6 @@
 flask
+fastapi
+uvicorn
 nba_api
 pandas
 numpy
@@ -6,3 +8,4 @@ scikit-learn
 joblib
 mlflow
 xgboost
+pydantic
