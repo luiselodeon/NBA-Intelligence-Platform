@@ -12,70 +12,66 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-# 1. Inicializar la aplicación
+# 1. Inicializar App
 app = FastAPI(
-    title="NBA Playoff Predictor API",
-    description="API para predecir si un equipo llegará a playoffs basado en estadísticas.",
-    version="1.0"
+    title="NBA Playoff Predictor",
+    description="Predice si un equipo clasifica a playoffs basándose en desempeño (No Ranking).",
+    version="2.0"
 )
 
-# 2. Cargar el modelo al iniciar
-# Asegúrate de que el archivo .joblib esté en la misma carpeta
+# 2. Cargar Modelo
 try:
     model = joblib.load("modelo_nba.joblib")
-    print("Modelo cargado exitosamente.")
-except FileNotFoundError:
-    print("Error: No se encontró el archivo 'modelo_nba.joblib'.")
+    print("Modelo cargado correctamente.")
+except:
+    print("ADVERTENCIA: No se encontró 'modelo_nba.joblib'.")
 
-# 3. Definir la estructura de los datos de entrada (Data Schema)
-# Esto valida que el usuario envíe números y no texto
+# 3. Definir Schema de Datos (ACTUALIZADO)
 class TeamStats(BaseModel):
-    win_pct: float      # Porcentaje de victorias (ej. 0.55)
-    points_pg: float    # Puntos por juego (ej. 115.5)
-    opp_points_pg: float # Puntos recibidos por juego (ej. 110.2)
-    conf_rank: int      # Ranking en la conferencia (ej. 8)
+    win_pct: float       # Ej: 0.55
+    points_pg: float     # Ej: 114.5
+    opp_points_pg: float # Ej: 112.0
+    diff_points_pg: float # Ej: 2.5 (Diferencial)
 
     class Config:
         schema_extra = {
             "example": {
                 "win_pct": 0.55,
                 "points_pg": 115.0,
-                "opp_points_pg": 112.5,
-                "conf_rank": 7
+                "opp_points_pg": 112.0,
+                "diff_points_pg": 3.0
             }
         }
 
-# 4. Crear el Endpoint de Predicción
+# 4. Endpoint de Predicción
 @app.post("/predict")
-def predict_playoffs(stats: TeamStats):
+def predict(stats: TeamStats):
     try:
-        # Convertir los datos recibidos a un DataFrame
-        # IMPORTANTE: Los nombres de las columnas deben coincidir con los usados en el entrenamiento
+        # Convertir input a DataFrame con los nombres EXACTOS del entrenamiento
         features = pd.DataFrame([[
             stats.win_pct,
             stats.points_pg,
             stats.opp_points_pg,
-            stats.conf_rank
-        ]], columns=['WinPCT', 'PointsPG', 'OppPointsPG', 'ConfRank'])
+            stats.diff_points_pg
+        ]], columns=['WinPCT', 'PointsPG', 'OppPointsPG', 'DiffPointsPG'])
 
-        # Realizar la predicción
-        prediction = model.predict(features)[0]                 # 0 o 1
-        probability = model.predict_proba(features)[0][1]       # Probabilidad de ser 1
+        # Predecir
+        prediction = model.predict(features)[0]
+        prob = model.predict_proba(features)[0][1]
 
-        # Crear respuesta
-        result = "CALIFICA" if prediction == 1 else "NO CALIFICA"
+        result_text = "CALIFICA" if prediction == 1 else "NO CALIFICA"
 
         return {
-            "prediction": result,
-            "probability_score": round(probability, 4),
-            "probability_percent": f"{round(probability * 100, 2)}%",
-            "input_data": stats
+            "prediction": result_text,
+            "probability": f"{round(prob * 100, 2)}%",
+            "details": {
+                "win_pct": stats.win_pct,
+                "diff_points": stats.diff_points_pg
+            }
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 5. Endpoint de prueba (Health Check)
 @app.get("/")
 def home():
-    return {"message": "La API de NBA está funcionando correctamente."}
+    return {"status": "API Online v2.0"}
