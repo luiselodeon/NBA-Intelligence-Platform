@@ -1,3 +1,5 @@
+# David Ceballos, Luis Arias, Rubén Flores
+
 import pandas as pd
 import joblib
 import os
@@ -8,7 +10,7 @@ import copy
 import numpy as np
 from flask import Flask, request, jsonify, make_response
 
-# Imports from notebook
+# Imports del notebook
 from nba_api.stats.endpoints import leaguegamefinder, leaguedashplayerstats
 from nba_api.stats.static import teams
 from sklearn.calibration import CalibratedClassifierCV
@@ -20,10 +22,10 @@ import xgboost as xgb
 
 
 # ==============================================================================
-# SETUP ON STARTUP: LOAD MODELS AND PREPARE DATA
+# SETUP: Cargar modelos y preparar datos base
 # ==============================================================================
 
-# --- Helper Functions from Notebook (for XGBoost model) ---
+# funciones helper para xgboost
 
 def seasons_from_start_years(start_year=2015, end_year_inclusive=2025):
     start_years = range(start_year, end_year_inclusive)
@@ -139,7 +141,7 @@ def build_single_game_features(df_team_feat: pd.DataFrame, home_abbr: str, away_
     out = {}
     out["H_DAYS_REST"] = (as_of_date - home_row['GAME_DATE']).days
     out["A_DAYS_REST"] = (as_of_date - away_row['GAME_DATE']).days
-    out["LAL_B2B"] = 1 if out["H_DAYS_REST"] <= 1 else 0  # Assuming 'LAL' was a placeholder for 'HOME'
+    out["LAL_B2B"] = 1 if out["H_DAYS_REST"] <= 1 else 0
 
     roll_cols = [c for c in df.columns if c.endswith(f"_roll{window}")]
     std_cols = [c for c in df.columns if c.endswith(f"_std{window}")]
@@ -150,40 +152,40 @@ def build_single_game_features(df_team_feat: pd.DataFrame, home_abbr: str, away_
         out[f"H_{c}"] = home_row[c]
         out[f"A_{c}"] = away_row[c]
 
-    # Differentials
+    # Diferenciales
     out["DIFF_DAYS_REST"] = out["H_DAYS_REST"] - out["A_DAYS_REST"]
     for c in roll_cols + std_cols + extra_cols:
         h, a = f"H_{c}", f"A_{c}"
         if h in out and a in out:
             out[f"DIFF_{c}"] = out[h] - out[a]
 
-    # Add ES_CASA (always 1 for this endpoint)
+    # Add ES_CASA (siempre uno)
     out["ES_CASA"] = 1
 
     return pd.DataFrame([out])
 
 
 print("--- Initializing Application ---")
-# Global variables for models and data
+# Variables globales para los modelos y datos
 xgb_model = None
 xgb_feature_cols = None
 xgb_base_data = None
 playoff_model = None
 
 try:
-    # 1. Load the XGBoost model bundle
+    # 1. Cargar el bundle del modelo XGBoost
     print("Loading XGBoost model from joblib...")
     xgb_bundle = joblib.load("xgb_isotonic_nba_homewin.joblib")
     xgb_model = xgb_bundle["model_calibrated"]
     xgb_feature_cols = xgb_bundle["feature_cols"]
     print("XGBoost model loaded successfully.")
 
-    # 2. Load the Playoff prediction model
+    # 2. Cargar el modelo de predicción de Playoffs
     print("Loading Playoff prediction model from joblib...")
     playoff_model = joblib.load("modelo_nba.joblib")
     print("Playoff prediction model loaded successfully.")
 
-    # 3. Prepare the base data required for feature generation
+    # 3. Preparar los datos base necesarios para la generación de features
     print("Fetching and preparing base NBA data (2015-2025)...")
     raw_data = fetch_official_nba_regular_season(start_year=2015, end_year=2025)
     team_game_data = build_team_game_table_from_raw(raw_data)
@@ -192,7 +194,7 @@ try:
 
 except Exception as e:
     print(f"FATAL: Could not initialize models or data on startup: {e}", file=sys.stderr)
-    xgb_model = None  # Ensure model is None if setup fails
+    xgb_model = None
     playoff_model = None
 
 print("--- Application Ready ---")
@@ -201,7 +203,7 @@ print("--- Application Ready ---")
 app = Flask(__name__)
 
 
-# --- Helper function for K-Means endpoint ---
+# Función helper para K-Means
 def preprocess_data_kmeans(df: pd.DataFrame, features: list) -> (pd.DataFrame, pd.DataFrame):
     """Preprocesses the raw player data for the K-Means model."""
     filtered_players = df[df['MIN'] >= 500].copy()
@@ -221,7 +223,6 @@ def preprocess_data_kmeans(df: pd.DataFrame, features: list) -> (pd.DataFrame, p
 # ==============================================================================
 # ENDPOINTS
 # ==============================================================================
-# Endpoint para clustering de jugadores (David Ceballos)
 @app.route('/cluster_players/', methods=['GET'])
 def cluster_players():
     """Endpoint to get clusters of NBA players."""
@@ -264,7 +265,7 @@ def cluster_players():
 
     return jsonify(k=k, player_clusters=results)
 
-# Endpoint para predicción de partidos NBA (XGBoost Luis Arias)
+
 @app.route('/predict_matchup', methods=['POST'])
 def predict_matchup():
     """Endpoint to predict the outcome of a single NBA matchup."""
@@ -292,9 +293,31 @@ def predict_matchup():
         )
         X_one = feature_row.reindex(columns=xgb_feature_cols)
 
+        # --- Fallback para features de posesiones ---
+        poss_cols = [
+            'H_POSS_EST_roll5',
+            'A_POSS_EST_roll5',
+            'DIFF_POSS_EST_roll5'
+        ]
+
+        for col in poss_cols:
+            if col in X_one.columns and X_one[col].isna().any():
+                X_one[col] = 0.0  # neutral value
+
+        # --- Fallback para flags de rolling ---
+        flag_cols = [
+            'H_HAS_ROLL_FEATURES',
+            'A_HAS_ROLL_FEATURES'
+        ]
+
+        for col in flag_cols:
+            if col in X_one.columns and X_one[col].isna().any():
+                X_one[col] = 0
+
         if X_one.isna().any().any():
             missing_cols = X_one.columns[X_one.isna().any()].tolist()
-            return make_response(jsonify(error=f"No se pudieron generar todas las features. Faltan datos para: {missing_cols}"), 500)
+            return make_response(
+                jsonify(error=f"No se pudieron generar todas las features. Faltan datos para: {missing_cols}"), 500)
 
         p_home = float(xgb_model.predict_proba(X_one)[:, 1][0])
         p_away = 1.0 - p_home
@@ -314,7 +337,7 @@ def predict_matchup():
         print(f"ERROR: /predict_matchup failed: {e}", file=sys.stderr)
         return make_response(jsonify(error="Ocurrió un error interno al procesar la predicción."), 500)
 
-# Endpoint para predicción de playoffs NBA (Rubén Flores)
+
 @app.route('/predict_playoffs', methods=['POST'])
 def predict_playoffs():
     """Endpoint to predict if a team will make the playoffs based on its stats."""
@@ -325,20 +348,20 @@ def predict_playoffs():
     if not json_data:
         return make_response(jsonify(error="Request body debe ser JSON."), 400)
 
-    # Validate required features
+    # Validar features requeridas
     required_features = ['WinPCT', 'PointsPG', 'OppPointsPG', 'DiffPointsPG']
     if not all(feat in json_data for feat in required_features):
         return make_response(jsonify(error=f"Faltan features. Se requieren: {required_features}"), 400)
 
     try:
-        # Create DataFrame from input
+        # Crear DataFrame de entrada
         input_data = {feat: [json_data[feat]] for feat in required_features}
         input_df = pd.DataFrame(input_data)
 
-        # Predict outcome and probability
+        # Predecir resultado y probabilidad
         prediction = int(playoff_model.predict(input_df)[0])
         probabilities = playoff_model.predict_proba(input_df)[0]
-        
+
         prob_no_playoffs = round(probabilities[0], 4)
         prob_playoffs = round(probabilities[1], 4)
 
@@ -350,9 +373,9 @@ def predict_playoffs():
             "probability_playoffs": prob_playoffs
         }
         return jsonify(response)
-        
+
     except (TypeError, ValueError):
-         return make_response(jsonify(error="Todas las features deben ser valores numéricos."), 400)
+        return make_response(jsonify(error="Todas las features deben ser valores numéricos."), 400)
     except Exception as e:
         print(f"ERROR: /predict_playoffs failed: {e}", file=sys.stderr)
         return make_response(jsonify(error="Ocurrió un error interno al procesar la predicción."), 500)
