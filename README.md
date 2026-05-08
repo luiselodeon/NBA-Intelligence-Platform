@@ -85,7 +85,7 @@ pip install -r requirements.txt
 
 ## Notebooks de Experimentación
 
-### 📓 `tests_luis.ipynb` — Luis Alberto Arias Llaguno
+### `tests_luis.ipynb` — Luis Alberto Arias Llaguno
 
 Este notebook es el más extenso del proyecto (128 celdas) y contiene todos los experimentos de Luis, que culminaron en el modelo final deployado en la API.
 
@@ -211,7 +211,7 @@ Dos implementaciones de logging:
 
 ---
 
-### 📓 `tests_ruben.ipynb` — Rubén Octavio Flores Ramos
+### `tests_ruben.ipynb` — Rubén Octavio Flores Ramos
 
 Este notebook (12 celdas) contiene el modelo de **predicción de playoffs** usando datos de standings históricos de la NBA.
 
